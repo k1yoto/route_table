@@ -46,7 +46,8 @@ test_performance (void)
   char line[4096];
   char cider[64];
   char nexthop[64];
-  int ret, res, i, count = 0;
+  int ret, count = 0;
+  uint64_t res, i;
   struct in_addr addr1, addr2;
   int plen;
   double tv1, tv2;
@@ -75,7 +76,7 @@ test_performance (void)
       if (ret < 0)
         return -1;
 
-      ret = rib_route_add (t, &addr1, plen, &addr2);
+      ret = rib_route_add (t, (const uint8_t *)&addr1, plen, (uint8_t *)&addr2);
       if (ret < 0)
         return -1;
 
@@ -91,18 +92,15 @@ test_performance (void)
   // see: https://github.com/drpnd/radix-tree/blob/master/tests/basic.c
   // Lookup the entire IPv4 address space
   res = 0;
-  for ( i = 0; i < 1000000; i++ ) {
-  // for ( i = 0; i < 0x100000000LL; i++ ) {
-      // if ( 0 == i % 0x10000000ULL ) {
-      //     TEST_PROGRESS();
-      // }
+  for ( i = 0; i < 0x10000000ULL; i++ ) {
       a = xor128();
-      res ^= (uint32_t)rib_route_lookup (t, (uint8_t *)&a);
+      res ^= (uint64_t)rib_route_lookup (t, (uint8_t *)&a);
   }
 
   tv2 = gettime ();
 
   printf ("Elapsed time: %.6f sec\n", tv2 - tv1);
+  printf ("Lookup per second: %.2f M lookups/sec\n", 0x10000000ULL / (tv2 - tv1) / 1000000);
 
   rib_free (t);
 

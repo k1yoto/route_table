@@ -5,8 +5,16 @@
 
 #include "radix.h"
 
-/* returns true if the b_th bit of key is 1 */
+// key: byte array, b: bit index
 #define BIT_CHECK(key, b) (((uint8_t *)(key))[(b) >> 3] & (0x80 >> ((b) & 0x7)))
+// key: address, s: start bit, n: number of bits
+#define BIT_INDEX(key, s, n) (((uint64_t)(key) << 32 >> (64 - ((s) + (n)))) & ((1 << (n)) - 1))
+
+#define K 2
+#define BRANCHNUM (1 << K)
+/*
+ * 00, 01, 10, 11 で小ノードを分木
+ */
 
 struct rib_tree
 *rib_new (struct rib_tree *t)
@@ -43,9 +51,10 @@ rib_free (struct rib_tree *t)
 }
 
 static int
-_add (struct rib_node **n, const char *key, int plen, char *data, int depth)
+_add (struct rib_node **n, const uint8_t *key, int plen, uint8_t *data, int depth)
 {
   struct rib_node *new;
+  uint32_t idx, base, first, count, offset;
 
   if (*n == NULL)
     {
@@ -66,23 +75,48 @@ _add (struct rib_node **n, const char *key, int plen, char *data, int depth)
       (*n)->data = data;
       return 0;
     }
+  else if (plen < depth + K)
+    {
+      /*
+       * depth=0
+       *   root
+       *    |-----00
+       *    |-----01
+       *    |-----10 <-
+       *    |-----11
+       *
+       * depth=2
+       *  root
+       *    |-----10
+       *           |-----00 child[0]
+       *           |-----01 child[1]
+       *           |-----10 child[2] <-
+       *           |-----11 child[3] <-
+       *
+       * depth=4
+       *  ...
+       *
+       * plen=3, 101/3
+       * -> expand into child[2] and child[3]
+       */
+      base = BIT_INDEX (key, depth, plen - depth);
+      first = base << (K - (plen - depth));
+      count = 1 << (K - (plen - depth));
 
-  if (BIT_CHECK (key, depth))
-    {
-      /* right */
-      _add (&(*n)->child[1], key, plen, data, depth + 1);
+      for (offset = 0; offset < count; offset ++)
+        _add (&(*n)->child[first + offset], key, plen, data, plen);
+
+      return 0;
     }
-  else
-    {
-      /* left */
-      _add (&(*n)->child[0], key, plen, data, depth + 1);
-    }
+
+  idx = BIT_INDEX(key, depth, K);
+  _add (&(*n)->child[idx], key, plen, data, depth + K);
 
   return 0;
 }
 
 int
-rib_route_add (struct rib_tree *t, const char *key, int plen, char *data)
+rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, uint8_t *data)
 {
   return _add (&t->root, key, plen, data, 0);
 }
@@ -90,9 +124,11 @@ rib_route_add (struct rib_tree *t, const char *key, int plen, char *data)
 // delete
 
 static struct rib_node *
-_lookup (struct rib_node *n, struct rib_node *cand, const char *key,
+_lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
          int depth)
 {
+  uint32_t idx;
+
   if (n == NULL)
     {
       return cand;
@@ -103,20 +139,13 @@ _lookup (struct rib_node *n, struct rib_node *cand, const char *key,
       cand = n;
     }
 
-  if (BIT_CHECK (key, depth))
-    {
-      /* right */
-      return _lookup (n->child[1], cand, key, depth + 1);
-    }
-  else
-    {
-      /* left */
-      return _lookup (n->child[0], cand, key, depth + 1);
-    }
+   idx = BIT_INDEX(key, depth, K);
+
+   return _lookup(n->child[idx], cand, key, depth + K);
 }
 
 struct rib_node *
-rib_route_lookup (struct rib_tree *t, const char *key)
+rib_route_lookup (struct rib_tree *t, const uint8_t *key)
 {
   return _lookup (t->root, NULL, key, 0);
 }
