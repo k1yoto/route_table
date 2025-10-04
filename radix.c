@@ -87,7 +87,64 @@ rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, void *data)
   return _add (&t->root, key, plen, data, 0);
 }
 
-// delete
+static int
+_shrink(struct rib_node **n)
+{
+    int left, right;
+
+    if ( *n == NULL ) {
+        return 0;
+    }
+
+    left = _shrink(&(*n)->child[0]);
+    right = _shrink(&(*n)->child[1]);
+
+    if ( left || right ) {
+        return 1;
+    } else {
+        if ( (*n)->child[0] == NULL && (*n)->child[1] == NULL && (*n)->data == NULL ) {
+            free(*n);
+            *n = NULL;
+            return 0;
+        } else {
+            return 1;
+        }
+    }
+}
+
+static int
+_delete(struct rib_node **n, const uint8_t *key, int plen, int depth)
+{
+  if (*n == NULL)
+    return -1;
+
+  if (plen == depth)
+    {
+      if ((*n)->data != NULL)
+      {
+        (*n)->data = NULL;
+        _shrink(n);
+        return 0;
+      } else {
+        return -1;
+      }
+    } else {
+      if (BIT_CHECK(key, depth))
+      {
+        /* right */
+        return _delete(&(*n)->child[1], key, plen, depth + 1);
+      } else {
+        /* left */
+        return _delete(&(*n)->child[0], key, plen, depth + 1);
+      }
+    }
+}
+
+int
+rib_route_delete(struct rib_tree *t, const uint8_t *key, int plen)
+{
+  return _delete(&t->root, key, plen, 0);
+}
 
 static struct rib_node *
 _lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
