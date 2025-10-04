@@ -51,7 +51,7 @@ rib_free (struct rib_tree *t)
 }
 
 static int
-_add (struct rib_node **n, const uint8_t *key, int plen, uint8_t *data, int depth)
+_add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth)
 {
   struct rib_node *new;
   uint32_t idx, base, first, count, offset;
@@ -116,7 +116,7 @@ _add (struct rib_node **n, const uint8_t *key, int plen, uint8_t *data, int dept
 }
 
 int
-rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, uint8_t *data)
+rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, void *data)
 {
   return _add (&t->root, key, plen, data, 0);
 }

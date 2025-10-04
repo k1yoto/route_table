@@ -43,15 +43,13 @@ test_performance (void)
 {
   struct rib_tree *t = NULL;
   FILE *fp;
-  char line[4096];
-  char cider[64];
-  char nexthop[64];
-  int ret, count = 0;
+  char line[4096], cider[64], nexthop[64];
+  int ret, plen, count = 0;
+  uint8_t addr1[4];
   uint64_t res, i;
-  struct in_addr addr1, addr2;
-  int plen;
+  uint32_t addr2, rand_addr;
   double tv1, tv2;
-  uint32_t a;
+  struct in_addr tmp;
 
   fp = fopen ("tests/rib.20251001.0000.ipv4.txt", "r");
   if (fp == NULL)
@@ -61,46 +59,81 @@ test_performance (void)
   if (t == NULL)
       return -1;
 
-  /* Load the full route */
+  /* Load the routes */
   while (fgets(line, sizeof(line), fp) != NULL)
     {
       ret = sscanf (line, "%63s %63s", cider, nexthop);
       if (ret < 0)
         return -1;
 
-      plen = inet_net_pton(AF_INET, cider, &addr1, sizeof(addr1));
+      plen = inet_net_pton(AF_INET, cider, addr1, sizeof(addr1));
       if (plen < 0)
         return -1;
 
-      ret = inet_pton (AF_INET, nexthop, &addr2);
+      ret = inet_pton (AF_INET, nexthop, &tmp);
+      if (ret < 0)
+        return -1;
+      addr2 = ntohl(tmp.s_addr);
+
+      ret = rib_route_add (t, addr1, plen, (void *)(uintptr_t)addr2);
       if (ret < 0)
         return -1;
 
-      ret = rib_route_add (t, (const uint8_t *)&addr1, plen, (uint8_t *)&addr2);
-      if (ret < 0)
-        return -1;
-
-      if (++count % 100000 == 0)
-          printf ("Added %d routes\n", count);
+      count++;
     }
 
   printf ("Total %d routes added\n", count);
   fclose (fp);
 
+  /* Lookup performance test */
   tv1 = gettime ();
 
-  // see: https://github.com/drpnd/radix-tree/blob/master/tests/basic.c
-  // Lookup the entire IPv4 address space
+  unsigned long long N = 0x10000000ULL;
   res = 0;
-  for ( i = 0; i < 0x10000000ULL; i++ ) {
-      a = xor128();
-      res ^= (uint64_t)rib_route_lookup (t, (uint8_t *)&a);
+  for ( i = 0; i < N; i++ ) {
+      rand_addr = xor128();
+      res ^= (uint64_t)rib_route_lookup (t, (uint8_t *)&rand_addr);
   }
 
   tv2 = gettime ();
 
-  printf ("Elapsed time: %.6f sec\n", tv2 - tv1);
-  printf ("Lookup per second: %.2f M lookups/sec\n", 0x10000000ULL / (tv2 - tv1) / 1000000);
+  /* Print the results */
+  printf ("Elapsed time: %.6f sec for %llu lookups\n", tv2 - tv1, N);
+  printf ("Lookup per second: %.6fM lookups/sec\n", N / (tv2 - tv1) / 1000000);
+
+  /* Additional test */
+  printf ("------------------------------------------------\n");
+  printf ("Additional test: lookup\n");
+  char buf[64];
+  struct rib_node *n;
+  uint32_t found_nexthop;
+  struct in_addr addr;
+  char *key[] = {
+      "1.0.0.1",
+      "1.0.4.1",
+      "1.0.5.1",
+      "1.0.6.1",
+  };
+  int j, k = sizeof(key) / sizeof(key[0]);
+
+  for (j = 0; j < k; j++)
+    {
+      ret = inet_pton (AF_INET, key[j], &addr);
+      if (ret < 0)
+          return -1;
+      n = rib_route_lookup (t, (uint8_t *)&addr);
+      if (n)
+        {
+          found_nexthop = (uint32_t)(uintptr_t)n->data;
+          tmp.s_addr = htonl(found_nexthop);
+          inet_ntop (AF_INET, &tmp, buf, sizeof(buf));
+          printf ("+ Found route for %s: %s\n", key[j], buf);
+        }
+      else
+        {
+          printf ("- No route for %s\n", key[j]);
+        }
+    }
 
   rib_free (t);
 
