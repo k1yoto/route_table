@@ -141,6 +141,7 @@ _lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
     }
 
   idx = BIT_INDEX(key, depth, K);
+  printf ("depth=%d, idx=%d\n", depth, idx);
 
   return _lookup(n->child[idx], cand, key, depth + K);
 }

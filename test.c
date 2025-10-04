@@ -85,6 +85,7 @@ test_performance (void)
   printf ("Total %d routes added\n", count);
   fclose (fp);
 
+#if 0
   /* Lookup performance test */
   tv1 = gettime ();
 
@@ -100,6 +101,7 @@ test_performance (void)
   /* Print the results */
   printf ("Elapsed time: %.6f sec for %llu lookups\n", tv2 - tv1, N);
   printf ("Lookup per second: %.6fM lookups/sec\n", N / (tv2 - tv1) / 1000000);
+#endif
 
   /* Additional test */
   printf ("------------------------------------------------\n");
