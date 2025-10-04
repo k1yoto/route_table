@@ -11,9 +11,9 @@
 #define BIT_INDEX(key, s, n) (((uint64_t)(key) << 32 >> (64 - ((s) + (n)))) & ((1 << (n)) - 1))
 
 #define K 2
-#define BRANCHNUM (1 << K)
+#define BRANCH_NUM (1 << K)
 /*
- * 00, 01, 10, 11 で小ノードを分木
+ * 00, 01, 10, 11
  */
 
 struct rib_tree
@@ -67,11 +67,12 @@ _add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth)
 
   if (plen == depth)
     {
-      if ((*n)->data != NULL)
+      if ((*n)->valid)
         {
           /* already exists */
           return -1;
         }
+      (*n)->valid = 1;
       (*n)->data = data;
       return 0;
     }
@@ -121,7 +122,7 @@ rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, void *data)
   return _add (&t->root, key, plen, data, 0);
 }
 
-// delete
+// delete is not implemented
 
 static struct rib_node *
 _lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
@@ -134,14 +135,14 @@ _lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
       return cand;
     }
 
-  if (n->data != NULL)
+  if (n->valid)
     {
       cand = n;
     }
 
-   idx = BIT_INDEX(key, depth, K);
+  idx = BIT_INDEX(key, depth, K);
 
-   return _lookup(n->child[idx], cand, key, depth + K);
+  return _lookup(n->child[idx], cand, key, depth + K);
 }
 
 struct rib_node *

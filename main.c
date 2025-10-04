@@ -13,5 +13,11 @@ main(int argc, const char *const argv[])
         return -1;
     }
 
+    // ret = test_basic();
+    // if (ret < 0) {
+    //     fprintf(stderr, "Basic test failed\n");
+    //     return -1;
+    // }
+
     return 0;
 }

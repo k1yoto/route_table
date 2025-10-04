@@ -3,8 +3,9 @@
 
 struct rib_node
 {
-  struct rib_node *child[2];
-  char *data;
+  struct rib_node *child[4];
+  int valid;
+  void *data;
 };
 
 struct rib_tree
