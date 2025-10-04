@@ -43,7 +43,7 @@ rib_free (struct rib_tree *t)
 }
 
 static int
-_add (struct rib_node **n, const char *key, int plen, char *data, int depth)
+_add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth)
 {
   struct rib_node *new;
 
@@ -82,7 +82,7 @@ _add (struct rib_node **n, const char *key, int plen, char *data, int depth)
 }
 
 int
-rib_route_add (struct rib_tree *t, const char *key, int plen, char *data)
+rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, void *data)
 {
   return _add (&t->root, key, plen, data, 0);
 }
@@ -90,7 +90,7 @@ rib_route_add (struct rib_tree *t, const char *key, int plen, char *data)
 // delete
 
 static struct rib_node *
-_lookup (struct rib_node *n, struct rib_node *cand, const char *key,
+_lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
          int depth)
 {
   if (n == NULL)
@@ -116,7 +116,7 @@ _lookup (struct rib_node *n, struct rib_node *cand, const char *key,
 }
 
 struct rib_node *
-rib_route_lookup (struct rib_tree *t, const char *key)
+rib_route_lookup (struct rib_tree *t, const uint8_t *key)
 {
   return _lookup (t->root, NULL, key, 0);
 }
