@@ -133,6 +133,19 @@ test_performance (void)
         {
           printf ("- No route for %s\n", key[j]);
         }
+      rib_route_delete (t, (uint8_t *)&addr, 24);
+      n = rib_route_lookup (t, (uint8_t *)&addr);
+      if (n)
+        {
+          found_nexthop = (uint32_t)(uintptr_t)n->data;
+          tmp.s_addr = htonl(found_nexthop);
+          inet_ntop (AF_INET, &tmp, buf, sizeof(buf));
+          printf ("+ Found route for %s: %s (not correct)\n", key[j], buf);
+        }
+      else
+        {
+          printf ("- No route for %s (correct)\n", key[j]);
+        }
     }
 
   rib_free (t);
