@@ -1,9 +1,12 @@
 #ifndef RADIX_H
 #define RADIX_H
 
+#define K 2
+#define CHILD_SZ (1 << K)
+
 struct rib_node
 {
-  struct rib_node *child[4];
+  struct rib_node *child[CHILD_SZ];
   char *data;
 };
 

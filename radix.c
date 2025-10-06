@@ -26,7 +26,7 @@ _free_rib_node (struct rib_node *n)
 {
   if (n != NULL)
     {
-      for (int i = 0; i < 4; i++)
+      for (int i = 0; i < CHILD_SZ; i++)
         {
           _free_rib_node (n->child[i]);
         }
@@ -66,10 +66,10 @@ _add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth)
       (*n)->data = data;
       return 0;
     }
-  else if (plen < depth + 2)
+  else if (plen < depth + K)
     {
-      base = BIT_INDEX(key, depth, (plen - depth)) << (2 - (plen - depth));
-      patterns = 1 << (2 - (plen - depth));
+      base = BIT_INDEX(key, depth, (plen - depth)) << (K - (plen - depth));
+      patterns = 1 << (K - (plen - depth));
 
       for (int i = 0; i < patterns; i++)
         {
@@ -88,8 +88,8 @@ _add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth)
       return 0;
     }
 
-  idx = BIT_INDEX(key, depth, 2);
-  return _add (&(*n)->child[idx], key, plen, data, depth + 2 );
+  idx = BIT_INDEX(key, depth, K);
+  return _add (&(*n)->child[idx], key, plen, data, depth + K );
 }
 
 int
@@ -107,7 +107,7 @@ _shrink(struct rib_node **n)
       return 0;
 
     has_child = 0;
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < CHILD_SZ; i++)
       {
         if ((*n)->child[i] != NULL || _shrink(&(*n)->child[i]))
           has_child = 1;
@@ -147,10 +147,10 @@ _delete(struct rib_node **n, const uint8_t *key, int plen, int depth)
       else
         return -1;
     }
-  else if (plen < depth + 2)
+  else if (plen < depth + K)
     {
-      base = BIT_INDEX(key, depth, (plen - depth)) << (2 - (plen - depth));
-      patterns = 1 << (2 - (plen - depth));
+      base = BIT_INDEX(key, depth, (plen - depth)) << (K - (plen - depth));
+      patterns = 1 << (K - (plen - depth));
 
       for (int i = 0; i < patterns; i++)
         {
@@ -164,8 +164,8 @@ _delete(struct rib_node **n, const uint8_t *key, int plen, int depth)
       return 0;
     }
 
-  idx = BIT_INDEX(key, depth, 2);
-  return _delete(&(*n)->child[idx], key, plen, depth + 2);
+  idx = BIT_INDEX(key, depth, K);
+  return _delete(&(*n)->child[idx], key, plen, depth + K);
 }
 
 int
@@ -186,8 +186,8 @@ _lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
   if (n->data != NULL)
     cand = n;
 
-  idx = BIT_INDEX(key, depth, 2);
-  return _lookup (n->child[idx], cand, key, depth + 2);
+  idx = BIT_INDEX(key, depth, K);
+  return _lookup (n->child[idx], cand, key, depth + K);
 }
 
 struct rib_node *
