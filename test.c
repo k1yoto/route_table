@@ -51,6 +51,9 @@ test_performance (void)
   double tv1, tv2;
   struct in_addr tmp;
 
+  printf ("------------------------------------------------\n");
+  printf ("Performance test:\n");
+
   fp = fopen ("tests/rib.20251001.0000.ipv4.txt", "r");
   if (fp == NULL)
       return -1;
@@ -101,24 +104,87 @@ test_performance (void)
   printf ("Elapsed time: %.6f sec for %llu lookups\n", tv2 - tv1, N);
   printf ("Lookup per second: %.6fM lookups/sec\n", N / (tv2 - tv1) / 1000000);
 
-  /* Additional test */
-  printf ("------------------------------------------------\n");
-  printf ("Additional test: lookup\n");
+  rib_free (t);
+
+  return 0;
+}
+
+int
+test_basic (void)
+{
+  struct rib_tree *t = NULL;
+  int ret;
+  uint8_t addr1[4];
   char buf[64];
   struct rib_node *n;
   uint32_t found_nexthop;
-  struct in_addr addr;
-  char *key[] = {
-      "1.0.0.1",
-      "1.0.4.1",
-      "1.0.5.1",
-      "1.0.6.1",
-  };
-  int j, k = sizeof(key) / sizeof(key[0]);
+  struct in_addr tmp, addr;
 
-  for (j = 0; j < k; j++)
+  printf ("------------------------------------------------\n");
+  printf ("Basic test:\n");
+
+  t = rib_new (t);
+  if (t == NULL)
+      return -1;
+  printf ("Tree initialized\n");
+
+  /* route information */
+  struct {
+      char *prefix;
+      char *nexthop;
+  } routes[] = {
+      {"192.168.1.0/24", "10.0.0.1"},
+      {"192.168.2.0/23", "10.0.0.2"},
+  };
+  int num_routes = sizeof(routes) / sizeof(routes[0]);
+
+  /* lookup addresses */
+  char *lookup_addrs[] = {
+      "192.168.1.10",
+      "192.168.2.10",
+      "192.168.3.10",
+      "1.1.1.1",
+  };
+  int num_tests = sizeof(lookup_addrs) / sizeof(lookup_addrs[0]);
+
+  printf ("\nLookup: Empty tree\n");
+  for (int i = 0; i < num_tests; i++)
     {
-      ret = inet_pton (AF_INET, key[j], &addr);
+      ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
+      if (ret < 0)
+          return -1;
+      n = rib_route_lookup (t, (uint8_t *)&addr);
+      if (n)
+          printf ("  %s: Found (unexpected)\n", lookup_addrs[i]);
+      else
+          printf ("  %s: Not found (expected)\n", lookup_addrs[i]);
+    }
+
+  printf ("\nAdd: Adding routes\n");
+  for (int i = 0; i < num_routes; i++)
+    {
+      int plen = inet_net_pton(AF_INET, routes[i].prefix, addr1, sizeof(addr1));
+      if (plen < 0)
+          return -1;
+
+      ret = inet_pton (AF_INET, routes[i].nexthop, &tmp);
+      if (ret < 0)
+          return -1;
+      uint32_t nexthop = ntohl(tmp.s_addr);
+
+      ret = rib_route_add (t, addr1, plen, (void *)(uintptr_t)nexthop);
+      if (ret < 0)
+        {
+          printf ("  Failed to add %s\n", routes[i].prefix);
+          return -1;
+        }
+      printf ("  Added %s -> %s\n", routes[i].prefix, routes[i].nexthop);
+    }
+
+  printf ("\nLookup: After adding routes\n");
+  for (int i = 0; i < num_tests; i++)
+    {
+      ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
       if (ret < 0)
           return -1;
       n = rib_route_lookup (t, (uint8_t *)&addr);
@@ -127,28 +193,43 @@ test_performance (void)
           found_nexthop = (uint32_t)(uintptr_t)n->data;
           tmp.s_addr = htonl(found_nexthop);
           inet_ntop (AF_INET, &tmp, buf, sizeof(buf));
-          printf ("+ Found route for %s: %s\n", key[j], buf);
+          printf ("  %s: Found -> %s\n", lookup_addrs[i], buf);
         }
       else
         {
-          printf ("- No route for %s\n", key[j]);
-        }
-      rib_route_delete (t, (uint8_t *)&addr, 24);
-      n = rib_route_lookup (t, (uint8_t *)&addr);
-      if (n)
-        {
-          found_nexthop = (uint32_t)(uintptr_t)n->data;
-          tmp.s_addr = htonl(found_nexthop);
-          inet_ntop (AF_INET, &tmp, buf, sizeof(buf));
-          printf ("+ Found route for %s: %s (not correct)\n", key[j], buf);
-        }
-      else
-        {
-          printf ("- No route for %s (correct)\n", key[j]);
+          printf ("  %s: Not found\n", lookup_addrs[i]);
         }
     }
 
+  printf ("\nDelete: Deleting routes\n");
+  for (int i = 0; i < num_routes; i++)
+    {
+      int plen = inet_net_pton(AF_INET, routes[i].prefix, addr1, sizeof(addr1));
+      if (plen < 0)
+          return -1;
+
+      ret = rib_route_delete (t, addr1, plen);
+      if (ret < 0)
+          printf ("  Failed to delete %s\n", routes[i].prefix);
+      else
+          printf ("  Deleted %s\n", routes[i].prefix);
+    }
+
+  printf ("\nLookup: After deleting routes\n");
+  for (int i = 0; i < num_tests; i++)
+    {
+      ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
+      if (ret < 0)
+          return -1;
+      n = rib_route_lookup (t, (uint8_t *)&addr);
+      if (n)
+          printf ("  %s: Found (unexpected)\n", lookup_addrs[i]);
+      else
+          printf ("  %s: Not found (expected)\n", lookup_addrs[i]);
+    }
+
   rib_free (t);
+  printf ("\nTree freed\n");
 
   return 0;
 }
