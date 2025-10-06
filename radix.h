@@ -3,7 +3,7 @@
 
 struct rib_node
 {
-  struct rib_node *child[2];
+  struct rib_node *child[4];
   char *data;
 };
 
