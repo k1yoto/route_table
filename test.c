@@ -78,7 +78,8 @@ test_performance (void)
         return -1;
       addr2 = ntohl(tmp.s_addr);
 
-      ret = rib_route_add (t, addr1, plen, (void *)(uintptr_t)addr2);
+      uint32_t key = ntohl(*(uint32_t*)addr1);
+      ret = rib_route_add (t, key, plen, (void *)(uintptr_t)addr2);
       if (ret < 0)
         return -1;
 
@@ -95,7 +96,7 @@ test_performance (void)
   res = 0;
   for ( i = 0; i < N; i++ ) {
       rand_addr = xor128();
-      res ^= (uint64_t)rib_route_lookup (t, (uint8_t *)&rand_addr);
+      res ^= (uint64_t)rib_route_lookup (t, rand_addr);
   }
 
   tv2 = gettime ();
@@ -135,15 +136,54 @@ test_basic (void)
   } routes[] = {
       {"192.168.1.0/24", "10.0.0.1"},
       {"192.168.2.0/23", "10.0.0.2"},
+      /* prefix lengths that cross K-bit boundaries */
+      {"10.0.0.0/8", "10.1.1.1"},        /* plen=8: stops before depth 9 */
+      {"10.64.0.0/10", "10.1.1.2"},      /* plen=10: crosses first K boundary (depth 9) */
+      {"10.128.0.0/9", "10.1.1.3"},      /* plen=9: exactly at first K boundary */
+      {"172.16.0.0/12", "10.2.2.1"},     /* plen=12: exactly at depth 12 */
+      {"172.16.64.0/18", "10.2.2.2"},    /* plen=18: exactly at depth 18 (K*6) */
+      {"172.16.128.0/17", "10.2.2.3"},   /* plen=17: crosses K boundary */
+      /* overlapping prefixes for longest prefix matching */
+      {"203.0.113.0/24", "10.3.3.1"},    /* /24 */
+      {"203.0.113.128/25", "10.3.3.2"},  /* /25 more specific */
+      {"203.0.113.192/26", "10.3.3.3"},  /* /26 even more specific */
+      /* short prefix test */
+      {"8.0.0.0/5", "10.4.4.1"},         /* plen=5: within first K bits */
+      {"128.0.0.0/1", "10.4.4.2"},       /* plen=1: single bit */
+      /* edge case: plen=32 */
+      {"198.51.100.42/32", "10.5.5.1"},  /* host route */
+      {"0.0.0.0/0", "10.5.5.2"},         /* plen=0: default route */
   };
   int num_routes = sizeof(routes) / sizeof(routes[0]);
 
   /* lookup addresses */
   char *lookup_addrs[] = {
-      "192.168.1.10",
-      "192.168.2.10",
-      "192.168.3.10",
-      "1.1.1.1",
+      "192.168.1.10",      /* 10.0.0.1 */
+      "192.168.2.10",      /* 10.0.0.2 */
+      "192.168.3.10",      /* 10.0.0.2 */
+      "1.1.1.1",           /* 10.5.5.2 */
+      /* boundary test */
+      "10.0.0.1",          /* 10.1.1.1 */
+      "10.64.0.1",         /* 10.1.1.2 (more specific than /8) */
+      "10.128.0.1",        /* 10.1.1.3 (more specific than /8) */
+      "10.192.0.1",        /* 10.1.1.3 */
+      "172.16.0.1",        /* 10.2.2.1 */
+      "172.16.64.1",       /* 10.2.2.2 (more specific) */
+      "172.16.128.1",      /* 10.2.2.3 (more specific) */
+      /* longest prefix matching */
+      "203.0.113.1",       /* 10.3.3.1 */
+      "203.0.113.129",     /* 10.3.3.2 */
+      "203.0.113.193",     /* 10.3.3.3 (most specific) */
+      /* short prefix test */
+      "8.8.8.8",           /* 10.4.4.1 */
+      "15.255.255.255",    /* 10.4.4.1 */
+      "128.0.0.1",         /* 10.4.4.2 */
+      "255.255.255.255",   /* 10.4.4.2 */
+      /* host route test */
+      "198.51.100.42",     /* 10.5.5.1 */
+      "198.51.100.43",     /* 10.4.4.2 */
+      "0.0.0.0",           /* 10.5.5.2 (default) */
+      "127.0.0.1",         /* 10.5.5.2 (default) */
   };
   int num_tests = sizeof(lookup_addrs) / sizeof(lookup_addrs[0]);
 
@@ -153,7 +193,8 @@ test_basic (void)
       ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
       if (ret < 0)
           return -1;
-      n = rib_route_lookup (t, (uint8_t *)&addr);
+      uint32_t lookup_key = ntohl(addr.s_addr);
+      n = rib_route_lookup (t, lookup_key);
       if (n)
           printf ("  %s: Found (unexpected)\n", lookup_addrs[i]);
       else
@@ -172,7 +213,8 @@ test_basic (void)
           return -1;
       uint32_t nexthop = ntohl(tmp.s_addr);
 
-      ret = rib_route_add (t, addr1, plen, (void *)(uintptr_t)nexthop);
+      uint32_t add_key = ntohl(*(uint32_t*)addr1);
+      ret = rib_route_add (t, add_key, plen, (void *)(uintptr_t)nexthop);
       if (ret < 0)
         {
           printf ("  Failed to add %s\n", routes[i].prefix);
@@ -187,7 +229,8 @@ test_basic (void)
       ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
       if (ret < 0)
           return -1;
-      n = rib_route_lookup (t, (uint8_t *)&addr);
+      uint32_t lookup_key2 = ntohl(addr.s_addr);
+      n = rib_route_lookup (t, lookup_key2);
       if (n)
         {
           found_nexthop = (uint32_t)(uintptr_t)n->data;
@@ -208,7 +251,8 @@ test_basic (void)
       if (plen < 0)
           return -1;
 
-      ret = rib_route_delete (t, addr1, plen);
+      uint32_t del_key = ntohl(*(uint32_t*)addr1);
+      ret = rib_route_delete (t, del_key, plen);
       if (ret < 0)
           printf ("  Failed to delete %s\n", routes[i].prefix);
       else
@@ -221,7 +265,8 @@ test_basic (void)
       ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
       if (ret < 0)
           return -1;
-      n = rib_route_lookup (t, (uint8_t *)&addr);
+      uint32_t lookup_key3 = ntohl(addr.s_addr);
+      n = rib_route_lookup (t, lookup_key3);
       if (n)
           printf ("  %s: Found (unexpected)\n", lookup_addrs[i]);
       else
