@@ -39,7 +39,7 @@ gettime(void)
 }
 
 int
-test_performance (void)
+test_performance (int k)
 {
   struct rib_tree *t = NULL;
   FILE *fp;
@@ -53,13 +53,13 @@ test_performance (void)
   uint8_t rand_addr[4];
 
   printf ("------------------------------------------------\n");
-  printf ("Performance test:\n");
+  printf ("Performance test (K=%d):\n", k);
 
   fp = fopen ("tests/rib.20251001.0000.ipv4.txt", "r");
   if (fp == NULL)
       return -1;
 
-  t = rib_new (t);
+  t = rib_new (k);
   if (t == NULL)
       return -1;
 
@@ -115,7 +115,7 @@ test_performance (void)
 }
 
 int
-test_basic (void)
+test_basic (int k)
 {
   struct rib_tree *t = NULL;
   int ret;
@@ -126,9 +126,9 @@ test_basic (void)
   struct in_addr tmp, addr;
 
   printf ("------------------------------------------------\n");
-  printf ("Basic test:\n");
+  printf ("Basic test (K=%d):\n", k);
 
-  t = rib_new (t);
+  t = rib_new (k);
   if (t == NULL)
       return -1;
   printf ("Tree initialized\n");
