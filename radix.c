@@ -5,8 +5,15 @@
 
 #include "radix.h"
 
-/* returns true if the b_th bit of key is 1 */
-#define BIT_INDEX(key, s, n) (((uint64_t)(key) << 32 >> (64 - ((s) + (n)))) & ((1 << (n)) - 1))
+static inline uint32_t
+BIT_INDEX32(const uint8_t *key, int s, int n)
+{
+  uint32_t key32 = ((uint32_t)key[0] << 24) |
+                   ((uint32_t)key[1] << 16) |
+                   ((uint32_t)key[2] << 8)  |
+                   ((uint32_t)key[3]);
+  return (((uint64_t)(key32) << 32 >> (64 - ((s) + (n)))) & ((1 << (n)) - 1));
+}
 
 struct rib_tree
 *rib_new (struct rib_tree *t)
@@ -45,7 +52,7 @@ rib_free (struct rib_tree *t)
 }
 
 static int
-_add (struct rib_node **n, uint32_t key, int plen, void *data, int depth)
+_add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth)
 {
   struct rib_node *new;
   int idx, base, patterns;
@@ -82,7 +89,7 @@ _add (struct rib_node **n, uint32_t key, int plen, void *data, int depth)
     }
   else if (plen < depth + K)
     {
-      base = BIT_INDEX(key, depth, (plen - depth)) << (K - (plen - depth));
+      base = BIT_INDEX32(key, depth, (plen - depth)) << (K - (plen - depth));
       patterns = 1 << (K - (plen - depth));
 
       for (int i = 0; i < patterns; i++)
@@ -105,12 +112,12 @@ _add (struct rib_node **n, uint32_t key, int plen, void *data, int depth)
       return 0;
     }
 
-  idx = BIT_INDEX(key, depth, K);
+  idx = BIT_INDEX32(key, depth, K);
   return _add (&(*n)->child[idx], key, plen, data, depth + K );
 }
 
 int
-rib_route_add (struct rib_tree *t, uint32_t key, int plen, void *data)
+rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, void *data)
 {
   return _add (&t->root, key, plen, data, 0);
 }
@@ -146,7 +153,7 @@ _shrink(struct rib_node **n)
 }
 
 static int
-_delete(struct rib_node **n, uint32_t key, int plen, int depth)
+_delete(struct rib_node **n, const uint8_t *key, int plen, int depth)
 {
   int idx, base, patterns, found;
 
@@ -178,7 +185,7 @@ _delete(struct rib_node **n, uint32_t key, int plen, int depth)
     }
   else if (plen < depth + K)
     {
-      base = BIT_INDEX(key, depth, (plen - depth)) << (K - (plen - depth));
+      base = BIT_INDEX32(key, depth, (plen - depth)) << (K - (plen - depth));
       patterns = 1 << (K - (plen - depth));
 
       found = 0;
@@ -203,18 +210,18 @@ _delete(struct rib_node **n, uint32_t key, int plen, int depth)
         return -1;
     }
 
-  idx = BIT_INDEX(key, depth, K);
+  idx = BIT_INDEX32(key, depth, K);
   return _delete(&(*n)->child[idx], key, plen, depth + K);
 }
 
 int
-rib_route_delete(struct rib_tree *t, uint32_t key, int plen)
+rib_route_delete(struct rib_tree *t, const uint8_t *key, int plen)
 {
   return _delete(&t->root, key, plen, 0);
 }
 
 static struct rib_node *
-_lookup (struct rib_node *n, struct rib_node *cand, uint32_t key,
+_lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
          int depth)
 {
   int idx;
@@ -225,12 +232,12 @@ _lookup (struct rib_node *n, struct rib_node *cand, uint32_t key,
   if (n->data != NULL)
     cand = n;
 
-  idx = BIT_INDEX(key, depth, K);
+  idx = BIT_INDEX32(key, depth, K);
   return _lookup (n->child[idx], cand, key, depth + K);
 }
 
 struct rib_node *
-rib_route_lookup (struct rib_tree *t, uint32_t key)
+rib_route_lookup (struct rib_tree *t, const uint8_t *key)
 {
   return _lookup (t->root, NULL, key, 0);
 }

@@ -47,9 +47,10 @@ test_performance (void)
   int ret, plen, count = 0;
   uint8_t addr1[4];
   uint64_t res, i;
-  uint32_t addr2, rand_addr;
+  uint32_t addr2;
   double tv1, tv2;
   struct in_addr tmp;
+  uint8_t rand_addr[4];
 
   printf ("------------------------------------------------\n");
   printf ("Performance test:\n");
@@ -78,8 +79,7 @@ test_performance (void)
         return -1;
       addr2 = ntohl(tmp.s_addr);
 
-      uint32_t key = ntohl(*(uint32_t*)addr1);
-      ret = rib_route_add (t, key, plen, (void *)(uintptr_t)addr2);
+      ret = rib_route_add (t, addr1, plen, (void *)(uintptr_t)addr2);
       if (ret < 0)
         return -1;
 
@@ -95,7 +95,11 @@ test_performance (void)
   unsigned long long N = 0x10000000ULL;
   res = 0;
   for ( i = 0; i < N; i++ ) {
-      rand_addr = xor128();
+      uint32_t r = xor128();
+      rand_addr[0] = (r >> 24) & 0xFF;
+      rand_addr[1] = (r >> 16) & 0xFF;
+      rand_addr[2] = (r >> 8) & 0xFF;
+      rand_addr[3] = r & 0xFF;
       res ^= (uint64_t)rib_route_lookup (t, rand_addr);
   }
 
@@ -193,8 +197,12 @@ test_basic (void)
       ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
       if (ret < 0)
           return -1;
-      uint32_t lookup_key = ntohl(addr.s_addr);
-      n = rib_route_lookup (t, lookup_key);
+      uint8_t lookup_addr[4];
+      lookup_addr[0] = (addr.s_addr >> 0) & 0xFF;
+      lookup_addr[1] = (addr.s_addr >> 8) & 0xFF;
+      lookup_addr[2] = (addr.s_addr >> 16) & 0xFF;
+      lookup_addr[3] = (addr.s_addr >> 24) & 0xFF;
+      n = rib_route_lookup (t, lookup_addr);
       if (n)
           printf ("  %s: Found (unexpected)\n", lookup_addrs[i]);
       else
@@ -213,8 +221,7 @@ test_basic (void)
           return -1;
       uint32_t nexthop = ntohl(tmp.s_addr);
 
-      uint32_t add_key = ntohl(*(uint32_t*)addr1);
-      ret = rib_route_add (t, add_key, plen, (void *)(uintptr_t)nexthop);
+      ret = rib_route_add (t, addr1, plen, (void *)(uintptr_t)nexthop);
       if (ret < 0)
         {
           printf ("  Failed to add %s\n", routes[i].prefix);
@@ -229,8 +236,12 @@ test_basic (void)
       ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
       if (ret < 0)
           return -1;
-      uint32_t lookup_key2 = ntohl(addr.s_addr);
-      n = rib_route_lookup (t, lookup_key2);
+      uint8_t lookup_addr[4];
+      lookup_addr[0] = (addr.s_addr >> 0) & 0xFF;
+      lookup_addr[1] = (addr.s_addr >> 8) & 0xFF;
+      lookup_addr[2] = (addr.s_addr >> 16) & 0xFF;
+      lookup_addr[3] = (addr.s_addr >> 24) & 0xFF;
+      n = rib_route_lookup (t, lookup_addr);
       if (n)
         {
           found_nexthop = (uint32_t)(uintptr_t)n->data;
@@ -251,8 +262,7 @@ test_basic (void)
       if (plen < 0)
           return -1;
 
-      uint32_t del_key = ntohl(*(uint32_t*)addr1);
-      ret = rib_route_delete (t, del_key, plen);
+      ret = rib_route_delete (t, addr1, plen);
       if (ret < 0)
           printf ("  Failed to delete %s\n", routes[i].prefix);
       else
@@ -265,8 +275,12 @@ test_basic (void)
       ret = inet_pton (AF_INET, lookup_addrs[i], &addr);
       if (ret < 0)
           return -1;
-      uint32_t lookup_key3 = ntohl(addr.s_addr);
-      n = rib_route_lookup (t, lookup_key3);
+      uint8_t lookup_addr[4];
+      lookup_addr[0] = (addr.s_addr >> 0) & 0xFF;
+      lookup_addr[1] = (addr.s_addr >> 8) & 0xFF;
+      lookup_addr[2] = (addr.s_addr >> 16) & 0xFF;
+      lookup_addr[3] = (addr.s_addr >> 24) & 0xFF;
+      n = rib_route_lookup (t, lookup_addr);
       if (n)
           printf ("  %s: Found (unexpected)\n", lookup_addrs[i]);
       else
