@@ -56,21 +56,29 @@ rib_free (struct rib_tree *t)
     }
 }
 
-static int
-_add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth, int k, int child_sz)
+static struct rib_node *
+_add (struct rib_node *n, const uint8_t *key, int plen, void *data, int depth, int k, int child_sz, int is_leaf)
 {
-  struct rib_node *new;
   int idx, base, patterns;
   size_t node_size;
 
-  if (*n == NULL)
+  if (n == NULL)
     {
       node_size = sizeof (struct rib_node) + child_sz * sizeof (struct rib_node *);
-      new = malloc (node_size);
-      if (!new)
-        return -1;
-      memset (new, 0, node_size);
-      *n = new;
+      n = malloc (node_size);
+      if (!n)
+        return NULL;
+      memset (n, 0, node_size);
+    }
+
+  if (is_leaf)
+    {
+      if (n->data == NULL || n->plen < plen)
+        {
+          n->data = data;
+          n->plen = plen;
+        }
+      return n;
     }
   
   if (plen == depth)
@@ -78,22 +86,11 @@ _add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth, 
       /* push to all child nodes */
       for (idx = 0; idx < child_sz; idx++)
         {
-          if ((*n)->child[idx] == NULL)
-            {
-              node_size = sizeof(struct rib_node) + child_sz * sizeof(struct rib_node *);
-              (*n)->child[idx] = malloc(node_size);
-              if (!(*n)->child[idx])
-                return -1;
-              memset((*n)->child[idx], 0, node_size);
-            }
-          /* update if more specific or data is NULL */
-          if ((*n)->child[idx]->data == NULL || (*n)->child[idx]->plen < plen)
-            {
-              (*n)->child[idx]->data = data;
-              (*n)->child[idx]->plen = plen;
-            }
+          n->child[idx] = _add (n->child[idx], key, plen, data, depth + k, k, child_sz, 1);
+          if (n->child[idx] == NULL)
+            return NULL;
         }
-      return 0;
+      return n;
     }
   else if (plen < depth + k)
     {
@@ -103,130 +100,99 @@ _add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth, 
       for (int i = 0; i < patterns; i++)
         {
           idx = base | i;
-          if ((*n)->child[idx] == NULL)
-            {
-              node_size = sizeof(struct rib_node) + child_sz * sizeof(struct rib_node *);
-              (*n)->child[idx] = malloc(node_size);
-              if (!(*n)->child[idx])
-                return -1;
-              memset((*n)->child[idx], 0, node_size);
-            }
-          /* update if more specific or data is NULL */
-          if ((*n)->child[idx]->data == NULL || (*n)->child[idx]->plen < plen)
-            {
-              (*n)->child[idx]->data = data;
-              (*n)->child[idx]->plen = plen;
-            }
+          n->child[idx] = _add (n->child[idx], key, plen, data, depth + k, k, child_sz, 1);
+          if (n->child[idx] == NULL)
+            return NULL;
         }
-      return 0;
+      return n;
     }
 
   idx = BIT_INDEX32(key, depth, k);
-  return _add (&(*n)->child[idx], key, plen, data, depth + k, k, child_sz);
+  n->child[idx] = _add (n->child[idx], key, plen, data, depth + k, k, child_sz, 0);
+  if (n->child[idx] == NULL)
+    return NULL;
+
+  return n;
 }
 
 int
 rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, void *data)
 {
-  return _add (&t->root, key, plen, data, 0, t->k, t->child_sz);
+  t->root = _add (t->root, key, plen, data, 0, t->k, t->child_sz, 0);
+  return (t->root == NULL) ? -1 : 0;
 }
 
-static int
-_shrink(struct rib_node **n, int child_sz)
+static struct rib_node *
+_shrink(struct rib_node *n, int child_sz)
 {
-    int has_child;
+    if (n == NULL)
+      return NULL;
 
-    if ( *n == NULL )
-      return 0;
-
-    has_child = 0;
     for (int i = 0; i < child_sz; i++)
       {
-        if ((*n)->child[i] != NULL || _shrink(&(*n)->child[i], child_sz))
-          has_child = 1;
+        if (n->child[i] != NULL)
+          return n;
       }
 
-    if (has_child)
-      return 1;
-    else
+    if (n->data == NULL)
       {
-        if ((*n)->data == NULL)
-          {
-            free(*n);
-            *n = NULL;
-            return 0;
-          }
-        else
-          return 1;
+        free (n);
+        return NULL;
       }
+
+    return n;
 }
 
-static int
-_delete(struct rib_node **n, const uint8_t *key, int plen, int depth, int k, int child_sz)
+static struct rib_node *
+_delete(struct rib_node *n, const uint8_t *key, int plen, int depth, int k, int child_sz, int is_leaf, int *found)
 {
-  int idx, base, patterns, found;
+  int idx, base, patterns;
 
-  if (*n == NULL)
-    return -1;
+  if (n == NULL)
+    return NULL;
+
+  if (is_leaf)
+    {
+      if (n->data != NULL && n->plen == plen)
+        {
+          n->data = NULL;
+          n->plen = 0;
+          *found = 1;
+        }
+      return n;
+    }
 
   if (plen == depth)
     {
       /* delete from all child nodes that match this prefix length */
-      found = 0;
       for (idx = 0; idx < child_sz; idx++)
-        {
-          if ((*n)->child[idx] != NULL &&
-              (*n)->child[idx]->data != NULL &&
-              (*n)->child[idx]->plen == plen)
-            {
-              (*n)->child[idx]->data = NULL;
-              (*n)->child[idx]->plen = 0;
-              found = 1;
-            }
-        }
-      if (found)
-        {
-          _shrink(n, child_sz);
-          return 0;
-        }
-      else
-        return -1;
+        n->child[idx] = _delete (n->child[idx], key, plen, depth + k, k, child_sz, 1, found);
+      return _shrink (n, child_sz);
     }
   else if (plen < depth + k)
     {
       base = BIT_INDEX32(key, depth, (plen - depth)) << (k - (plen - depth));
       patterns = 1 << (k - (plen - depth));
 
-      found = 0;
       for (int i = 0; i < patterns; i++)
         {
           idx = base | i;
-          if ((*n)->child[idx] != NULL &&
-              (*n)->child[idx]->data != NULL &&
-              (*n)->child[idx]->plen == plen)
-            {
-              (*n)->child[idx]->data = NULL;
-              (*n)->child[idx]->plen = 0;
-              found = 1;
-            }
+          n->child[idx] = _delete (n->child[idx], key, plen, depth + k, k, child_sz, 1, found);
         }
-      if (found)
-        {
-          _shrink(n, child_sz);
-          return 0;
-        }
-      else
-        return -1;
+      return _shrink (n, child_sz);
     }
 
   idx = BIT_INDEX32(key, depth, k);
-  return _delete(&(*n)->child[idx], key, plen, depth + k, k, child_sz);
+  n->child[idx] = _delete(n->child[idx], key, plen, depth + k, k, child_sz, 0, found);
+  return _shrink (n, child_sz);
 }
 
 int
 rib_route_delete(struct rib_tree *t, const uint8_t *key, int plen)
 {
-  return _delete(&t->root, key, plen, 0, t->k, t->child_sz);
+  int found = 0;
+  t->root = _delete(t->root, key, plen, 0, t->k, t->child_sz, 0, &found);
+  return found ? 0 : -1;
 }
 
 static struct rib_node *
