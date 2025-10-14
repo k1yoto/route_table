@@ -7,7 +7,8 @@
 struct rib_node
 {
   struct rib_node *child[BRANCH_SZ];
-  int valid;
+  int leaf; // 0: non-leaf, 1: leaf
+  int plen;
   void *data;
 };
 

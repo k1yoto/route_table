@@ -121,7 +121,7 @@ test_basic (struct rib_tree *t, const char *filename)
   char buf[64], line[4096], addr1[64];
   struct rib_node *n;
   uint32_t found_nexthop;
-  struct in_addr addr, tmp;
+  struct in_addr addr;
   FILE *fp;
 
   fp = fopen (filename, "r");
@@ -142,9 +142,8 @@ test_basic (struct rib_tree *t, const char *filename)
       n = rib_route_lookup (t, (uint8_t *)&addr);
       if (n)
         {
-          found_nexthop = (uint32_t)(uintptr_t)n->data;
-          tmp.s_addr = htonl(found_nexthop);
-          inet_ntop (AF_INET, &tmp, buf, sizeof(buf));
+          found_nexthop = htonl((uint32_t)(uintptr_t)n->data);
+          inet_ntop (AF_INET, &found_nexthop, buf, sizeof(buf));
           printf ("+ Found route for %-16s: %s\n", addr1, buf);
         }
       else

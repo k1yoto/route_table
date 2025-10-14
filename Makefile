@@ -1,5 +1,5 @@
 CC       := gcc
-CFLAGS   := -Wall -Wextra -O2 -g
+CFLAGS   := -Wall -Wextra -g
 VALGRIND := valgrind
 VFLAGS   := -s --leak-check=full --show-leak-kinds=all --track-origins=yes
 
@@ -12,12 +12,24 @@ PROGS     := main
 SRCS_main := main.c $(COMMON_SRCS)
 OBJS_main := $(SRCS_main:.c=.o)
 
+# ビルドタイプ (release or debug)
+BUILDTYPE ?= release
+
+# release / debug で CFLAGS 切替
+ifeq ($(BUILDTYPE),debug)
+    CFLAGS += -DDEBUG -O0
+else
+    CFLAGS += -O2
+endif
+
 all: $(PROGS)
 
-# main のリンク
-# inet_net_pton のために -lresolv を追加
 main: $(OBJS_main)
 	$(CC) $(CFLAGS) -o $@ $^ -lresolv
+
+# デバッグビルド
+debug:
+	$(MAKE) BUILDTYPE=debug
 
 # valgrind 実行
 main-valgrind: main
@@ -27,12 +39,7 @@ main-valgrind: main
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# 依存関係
-main.o:   radix.h test.h
-radix.o:  radix.h
-test.o:   test.h
-
 clean:
 	rm -f $(PROGS) *.o
 
-.PHONY: all clean main-valgrind
+.PHONY: all clean main-valgrind debug
