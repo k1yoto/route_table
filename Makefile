@@ -33,7 +33,7 @@ debug:
 
 # valgrind 実行
 main-valgrind: main
-	$(VALGRIND) $(VFLAGS) ./main
+	$(VALGRIND) $(VFLAGS) ./main tests/rib.simple.0000.ipv4.txt tests/lookup.address.ipv4.txt
 
 # .c → .o のルール
 %.o: %.c

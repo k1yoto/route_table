@@ -1,7 +1,7 @@
 #ifndef RADIX_H
 #define RADIX_H
 
-#define K 2
+#define K 6
 #define BRANCH_SZ (1 << K)
 
 struct rib_node
