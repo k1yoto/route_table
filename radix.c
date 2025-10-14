@@ -53,58 +53,62 @@ rib_free (struct rib_tree *t)
     }
 }
 
-static int
-_add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth)
+static inline struct rib_node *
+_create_node (void)
 {
   struct rib_node *new;
-  uint32_t index, base, first, count, i;
-  int exists = (*n == NULL);
 
-  if (*n == NULL)
-    {
-      new = malloc (sizeof (struct rib_node));
-      if (new == NULL)
-        return -1;
-      memset (new, 0, sizeof (struct rib_node));
-      *n = new;
-    }
+  new = malloc (sizeof (struct rib_node));
+  if (new != NULL)
+    memset (new, 0, sizeof (struct rib_node));
+  return new;
+}
+
+static struct rib_node *
+_add (struct rib_node *n, const uint8_t *key, int plen, void *data, int depth)
+{
+  uint32_t index, base, first, count, i;
+  int exists = (n != NULL);
+
+  if (n == NULL)
+    n = _create_node ();
 
   /* case1: 階層がプレフィックスに到達した場合 */
   if (plen <= depth)
     {
       /* 葉ノードではない（=子ノードが存在する）場合:
        * 全ての子に新しいプレフィックスを伝播 */
-      if (!(*n)->leaf && !exists)
+      if (!n->leaf && exists)
         {
           for (i = 0; i < BRANCH_SZ; i++)
-            _add (&(*n)->child[i], key, plen, data, depth + K);
-          return 0;
+            n->child[i] = _add (n->child[i], key, plen, data, depth + K);
+          return n;
         }
       /* 葉ノードの場合 */
-      else if ((*n)->leaf)
+      else if (n->leaf)
         {
           /* より長いプレフィックスの場合に更新 */
-          if (plen > (*n)->plen)
+          if (plen > n->plen)
             {
-              (*n)->plen = plen;
-              (*n)->data = data;
+              n->plen = plen;
+              n->data = data;
 #ifdef DEBUG
               printf ("update leaf plen=%d, data=%p, depth=%d\n", plen, data,
                       depth);
 #endif
             }
-          return 0;
+          return n;
         }
       /* 新規葉ノードとして登録 */
       else
         {
-          (*n)->leaf = 1;
-          (*n)->plen = plen;
-          (*n)->data = data;
+          n->leaf = 1;
+          n->plen = plen;
+          n->data = data;
 #ifdef DEBUG
           printf ("set leaf plen=%d, data=%p, depth=%d\n", plen, data, depth);
 #endif
-          return 0;
+          return n;
         }
     }
 
@@ -123,22 +127,23 @@ _add (struct rib_node **n, const uint8_t *key, int plen, void *data, int depth)
         {
           if (i >= first && i < first + count)
             /* この範囲には新しいノードを登録 */
-            _add (&(*n)->child[i], key, plen, data, depth + K);
-          else if ((*n)->leaf)
+            n->child[i] = _add (n->child[i], key, plen, data, depth + K);
+          else if (n->leaf)
             /* 範囲外には親ノードのデータをコピー */
             // Note: keyに問題があるかも..
-            _add (&(*n)->child[i], key, (*n)->plen, (*n)->data, depth + K);
+            n->child[i] = _add (n->child[i], key, n->plen, n->data, depth + K);
         }
       /* 現在のノードはもはや葉ノードではない */
-      (*n)->leaf = 0;
-      (*n)->plen = 0;
-      (*n)->data = NULL;
-      return 0;
+      n->leaf = 0;
+      n->plen = 0;
+      n->data = NULL;
+      return n;
     }
 
   /* case3: さらに深い階層へ再帰 */
   index = BIT_INDEX32 (key, depth, K);
-  return _add (&(*n)->child[index], key, plen, data, depth + K);
+  n->child[index] = _add (n->child[index], key, plen, data, depth + K);
+  return n;
 }
 
 int
@@ -150,7 +155,8 @@ rib_route_add (struct rib_tree *t, const uint8_t *key, int plen, void *data)
   printf ("----- Add %d: key=%u.%u.%u.%u/%d, data=%p -----\n", count, key[0],
           key[1], key[2], key[3], plen, data);
 #endif
-  return _add (&t->root, key, plen, data, 0);
+  t->root = _add(t->root, key, plen, data, 0);
+  return (t->root == NULL) ? -1 : 0; /* error(-1) if root is NULL */
 }
 
 // delete is not implemented
