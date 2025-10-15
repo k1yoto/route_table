@@ -54,7 +54,7 @@ rib_free (struct rib_tree *t)
 }
 
 static inline struct rib_node *
-_create_node (void)
+_create_rib_node (void)
 {
   struct rib_node *new;
 
@@ -67,16 +67,18 @@ _create_node (void)
 static struct rib_node *
 _add (struct rib_node *n, const uint8_t *key, int plen, void *data, int depth)
 {
-  uint32_t index, base, first, count, i;
+  uint32_t index, i;
+  uint32_t bits_in_depth, base, first, count;
   int exists = (n != NULL);
 
-  if (n == NULL)
-    n = _create_node ();
+  if (!exists)
+    n = _create_rib_node ();
 
   /* case1: 階層がプレフィックスに到達した場合 */
   if (plen <= depth)
     {
-      /* 葉ノードではない（=子ノードが存在する）場合:
+      /* 葉ノードではない（=子ノードが存在する）かつ、
+       * 既にノードが存在する（=内部ノード）場合に
        * 全ての子に新しいプレフィックスを伝播 */
       if (!n->leaf && exists)
         {
@@ -115,9 +117,29 @@ _add (struct rib_node *n, const uint8_t *key, int plen, void *data, int depth)
   /* case2: プレフィックスが次の階層の途中で終わる場合 */
   if (plen < depth + K)
     {
+      /*
+       * - Example: K=2 (4-ary)
+       *   - 96.0.0.0/3 (0b011/3)
+       * ------------------------------------------
+       *    v depth=0
+       * root      v depth=2
+       *    |---- 01      v depth=4
+       *           |---- 00
+       *           |---- 01
+       *           |---- 10 <- new node: 96.0.0.0/3
+       *           |---- 11 <- new node: 96.0.0.0/3
+       * ------------------------------------------
+       * - plen=3. depth=2 (3 < 2 + 2)
+       *   - bits_in_depth: 3 - 2 = 1 (0b01|1*)
+       *                                    ^
+       *   - base = 0b01|10
+       *               ^x1 = 1
+       *   - first = 1 << (2 - 1) = 0b010 = 2
+       *   - count = 1 << (2 - 1) = 0b010 = 2
+       *   - range: child[2] to child[3]
+       */
       /* 新しいプレフィックスが登録される子ノードの範囲を計算 */
-      int bits_in_depth
-          = plen - depth; // この階層で決定されるビット数（1〜K-1）
+      bits_in_depth = plen - depth; // この階層で決定されるビット数（1〜K-1）
       base = BIT_INDEX32 (key, depth, bits_in_depth);
       first = base << (K - bits_in_depth); // 範囲の開始インデックス
       count = 1 << (K - bits_in_depth);    // 範囲のサイズ
@@ -130,7 +152,6 @@ _add (struct rib_node *n, const uint8_t *key, int plen, void *data, int depth)
             n->child[i] = _add (n->child[i], key, plen, data, depth + K);
           else if (n->leaf)
             /* 範囲外には親ノードのデータをコピー */
-            // Note: keyに問題があるかも..
             n->child[i] = _add (n->child[i], key, n->plen, n->data, depth + K);
         }
       /* 現在のノードはもはや葉ノードではない */
@@ -174,7 +195,9 @@ _lookup (struct rib_node *n, struct rib_node *cand, const uint8_t *key,
     cand = n;
 
   index = BIT_INDEX32 (key, depth, K);
-  // printf ("depth=%d, index=%d\n", depth, index);
+#ifdef DEBUG
+  printf ("depth=%d, index=%d\n", depth, index);
+#endif
 
   return _lookup (n->child[index], cand, key, depth + K);
 }
