@@ -1,159 +1,349 @@
+#include <arpa/inet.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <arpa/inet.h>
 #include <sys/time.h>
 
 #include "radix.h"
 
-/*
- * Xorshift
- * see: https://github.com/drpnd/radix-tree/blob/master/tests/basic.c
- */
-static __inline__ uint32_t
-xor128(void)
-{
-    static uint32_t x = 123456789;
-    static uint32_t y = 362436069;
-    static uint32_t z = 521288629;
-    static uint32_t w = 88675123;
-    uint32_t t;
+#define LINE_BUF_SIZE 4096
+#define IP_BUF_SIZE 64
 
-    t = x ^ (x<<11);
-    x = y;
-    y = z;
-    z = w;
-    return w = (w ^ (w>>19)) ^ (t ^ (t >> 8));
+/* -------------------------------------------
+ * Utilities
+ * ------------------------------------------- */
+
+/* Xorshift32 RNG */
+/* see: https://github.com/drpnd/radix-tree/blob/master/tests/basic.c */
+static inline uint32_t
+xorshift32 (void)
+{
+  static uint32_t s = 0x9E3779B9u;
+  s ^= s << 13;
+  s ^= s >> 17;
+  s ^= s << 5;
+  return s;
 }
 
-/*
- * see: https://www.cc.u-tokyo.ac.jp/public/VOL8/No5/data_no2_0609.pdf
- */
+/* Elapsed time in seconds (double) */
+/* see: https://www.cc.u-tokyo.ac.jp/public/VOL8/No5/data_no2_0609.pdf */
 static double
-gettime(void)
+now_seconds (void)
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec + tv.tv_usec / 1000000.0;
+  struct timeval tv;
+  gettimeofday (&tv, NULL);
+  return (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
 }
 
-struct rib_tree *
-test_load_routes (const char *filename)
+static inline void
+uint32_to_ipv4_bytes_hton (uint32_t host_ip, uint8_t out[4])
 {
-  struct rib_tree *t = NULL;
-  FILE *fp;
-  char line[4096], cider[64], nexthop[64];
-  int ret, plen, count = 0;
-  uint8_t addr1[4];
-  uint32_t addr2;
-  struct in_addr tmp;
+  uint32_t net_ip = htonl (host_ip);
+  memcpy (out, &net_ip, 4);
+}
 
-  fp = fopen (filename, "r");
-  if (fp == NULL)
-      return NULL;
+static inline uint32_t
+ipv4_bytes_to_uint32_ntoh (const uint8_t addr[4])
+{
+  uint32_t net_ip;
+  memcpy (&net_ip, addr, 4);
+  return ntohl (net_ip);
+}
 
-  t = rib_new (t);
-  if (t == NULL)
-      return NULL;
+/* -------------------------------------------
+ * Route loading
+ * ファイル形式: "<cidr> <next-hop-ip>"
+ * 例: "10.0.0.0/8 192.0.2.1"
+ * ------------------------------------------- */
+static struct rib_tree *
+_load_routes (const char *path)
+{
+  FILE *fp = NULL;
+  struct rib_tree *tree = NULL;
 
-  /* Load the routes */
-  while (fgets(line, sizeof(line), fp) != NULL)
+  char line[LINE_BUF_SIZE];
+  char cidr_buf[IP_BUF_SIZE];
+  char nh_buf[IP_BUF_SIZE];
+
+  int plen, added;
+
+  uint8_t cidr_net_u8[4]; /* CIDR(ネットワークオーダ) */
+  // uint32_t cidr_host_u32; /* CIDR(ホストオーダ) */
+  uint8_t nh_net_u8[4]; /* ネクストホップ(ネットワークオーダ) */
+  uint32_t nh_host_u32; /* ネクストホップ(ホストオーダ) */
+
+  printf ("Loading routes from file: %s\n", path);
+  fp = fopen (path, "r");
+  if (!fp)
     {
-      ret = sscanf (line, "%63s %63s", cider, nexthop);
-      if (ret < 0)
-        return NULL;
-
-      plen = inet_net_pton(AF_INET, cider, addr1, sizeof(addr1));
-      if (plen < 0)
-        return NULL;
-
-      ret = inet_pton (AF_INET, nexthop, &tmp);
-      if (ret < 0)
-        return NULL;
-      addr2 = ntohl(tmp.s_addr);
-
-      ret = rib_route_add (t, addr1, plen, (void *)(uintptr_t)addr2);
-      if (ret < 0)
-        return NULL;
-
-      count++;
+      fprintf (stderr, "ERROR: cannot open route file: %s\n", path);
+      return NULL;
     }
 
-  printf ("Total %d routes added\n", count);
+  tree = rib_new (tree);
+  if (!tree)
+    {
+      fprintf (stderr, "ERROR: rib_new failed\n");
+      fclose (fp);
+      return NULL;
+    }
+
+  added = 0;
+  while (fgets (line, sizeof (line), fp))
+    {
+      if (sscanf (line, "%63s %63s", cidr_buf, nh_buf) != 2)
+        {
+          fprintf (stderr,
+                   "WARN: skip invalid line (need: \"<cidr> <nexthop>\"): %s",
+                   line);
+          continue;
+        }
+
+      plen = inet_net_pton (AF_INET, cidr_buf, &cidr_net_u8,
+                            sizeof (cidr_net_u8));
+      if (plen < 0)
+        {
+          fprintf (stderr, "WARN: invalid CIDR \"%s\" (skip)\n", cidr_buf);
+          continue;
+        }
+
+      if (!inet_pton (AF_INET, nh_buf, &nh_net_u8))
+        {
+          fprintf (stderr, "WARN: invalid next-hop \"%s\" (skip)\n", nh_buf);
+          continue;
+        }
+      nh_host_u32 = ipv4_bytes_to_uint32_ntoh (nh_net_u8);
+
+      if (rib_route_add (tree, cidr_net_u8, plen,
+                         (void *)(uintptr_t)nh_host_u32)
+          < 0)
+        {
+          fprintf (stderr, "ERROR: rib_route_add failed for %s %s\n", cidr_buf,
+                   nh_buf);
+          rib_free (tree);
+          fclose (fp);
+          return NULL;
+        }
+
+      added++;
+    }
+
+  printf ("Total %d routes added\n", added);
+  fclose (fp);
+  return tree;
+}
+
+/* -------------------------------------------
+ * Basic lookup test
+ * ファイル形式: "<ip>"
+ * 例: "203.0.113.5"
+ * ------------------------------------------- */
+int
+_run_basic_lookup (struct rib_tree *tree, const char *path)
+{
+  printf ("============================================\n");
+
+  FILE *fp;
+  struct rib_node *node;
+
+  char line[LINE_BUF_SIZE];
+  char ip_addr_buf[IP_BUF_SIZE];
+  char nh_buf[IP_BUF_SIZE];
+
+  uint8_t ip_addr_net_u8[4]; /* CIDR(ネットワークオーダ) */
+  // uint32_t ip_addr_host_u32; /* CIDR(ホストオーダ) */
+  uint8_t nh_net_u8[4]; /* ネクストホップ(ネットワークオーダ) */
+  uint32_t nh_host_u32; /* ネクストホップ(ホストオーダ) */
+
+  if (!tree || !path)
+    return -1;
+
+  printf ("Lookup test with file: %s\n", path);
+  fp = fopen (path, "r");
+  if (!fp)
+    {
+      fprintf (stderr, "ERROR: cannot open lookup file: %s\n", path);
+      return -1;
+    }
+
+  while (fgets (line, sizeof (line), fp))
+    {
+      if (sscanf (line, "%63s", ip_addr_buf) != 1)
+        {
+          fprintf (stderr, "WARN: skip invalid line: %s", line);
+          continue;
+        }
+
+      if (!inet_pton (AF_INET, ip_addr_buf, ip_addr_net_u8))
+        {
+          fprintf (stderr, "WARN: invalid IPv4 address \"%s\" (skip)\n",
+                   ip_addr_buf);
+          continue;
+        }
+
+      node = rib_route_lookup (tree, ip_addr_net_u8);
+      if (node)
+        {
+          nh_host_u32 = (uint32_t)(uintptr_t)node->data;
+          uint32_to_ipv4_bytes_hton (nh_host_u32, nh_net_u8);
+
+          inet_ntop (AF_INET, nh_net_u8, nh_buf, sizeof (nh_buf));
+          printf ("+ Found route for %-16s: %s\n", ip_addr_buf, nh_buf);
+        }
+      else
+        printf ("- No route for %s\n", ip_addr_buf);
+    }
+
+  fclose (fp);
+  return 0;
+}
+
+/* -------------------------------------------
+ * Delete test
+ * ファイル形式: "<cidr>"
+ * 例: "10.0.0.0/8"
+ * ------------------------------------------- */
+int
+_run_delete_test (struct rib_tree *tree, const char *lookup_path,
+                  const char *delete_path)
+{
+  FILE *fp;
+
+  char line[LINE_BUF_SIZE];
+  char cidr_buf[IP_BUF_SIZE];
+
+  int plen, deleted;
+
+  uint8_t cidr_net_u8[4]; /* CIDR(ネットワークオーダ) */
+  // uint32_t cidr_host_u32; /* CIDR(ホストオーダ) */
+  // uint8_t nh_net_u8[4];   /* ネクストホップ(ネットワークオーダ) */
+  // uint32_t nh_host_u32;   /* ネクストホップ(ホストオーダ) */
+
+  if (!tree || !lookup_path || !delete_path)
+    return -1;
+
+  printf ("\nBefore deletion, run lookup test:\n");
+  if (_run_basic_lookup (tree, lookup_path) < 0)
+    return -1;
+
+  printf ("\nDelete routes from file: %s\n", delete_path);
+  fp = fopen (delete_path, "r");
+  if (!fp)
+    {
+      fprintf (stderr, "ERROR: cannot open delete file: %s\n", delete_path);
+      return -1;
+    }
+
+  deleted = 0;
+  while (fgets (line, sizeof (line), fp))
+    {
+      if (sscanf (line, "%63s", cidr_buf) != 1)
+        {
+          fprintf (stderr, "WARN: skip invalid line: %s", line);
+          continue;
+        }
+
+      plen = inet_net_pton (AF_INET, cidr_buf, cidr_net_u8,
+                            sizeof (cidr_net_u8));
+      if (plen < 0)
+        {
+          fprintf (stderr, "WARN: invalid CIDR \"%s\" (skip)\n", cidr_buf);
+          continue;
+        }
+
+      printf ("- Deleting route for %s\n", cidr_buf);
+      if (rib_route_delete (tree, cidr_net_u8, plen) < 0)
+        {
+          fprintf (stderr, "ERROR: rib_route_delete failed for %s\n",
+                   cidr_buf);
+          fclose (fp);
+          return -1;
+        }
+      deleted++;
+    }
+
+  printf ("Total %d routes deleted\n", deleted);
   fclose (fp);
 
-  return t;
+  printf ("\nAfter deletion, run lookup test:\n");
+  if (_run_basic_lookup (tree, lookup_path) < 0)
+    return -1;
+
+  return 0;
+}
+
+/* -------------------------------------------
+ * Performance benchmark
+ * ランダム IPv4 を大量に引いてルックアップ（正否は不問）
+ * ------------------------------------------- */
+int
+_benchmark_lookup_performance (struct rib_tree *tree, uint64_t trials)
+{
+  struct rib_node *n;
+
+  double t1, t2;
+  double elapsed, qps;
+
+  uint8_t rand_net_u8[4]; /* CIDR(ネットワークオーダ) */
+  uint32_t rand_host_u32; /* CIDR(ホストオーダ) */
+
+  if (!tree || trials == 0)
+    return -1;
+
+  t1 = now_seconds ();
+
+  /* 最適化回避用の集計変数 */
+  uintptr_t sink = 0;
+
+  for (uint64_t i = 0; i < trials; i++)
+    {
+      rand_host_u32 = xorshift32 (); /* ホストオーダの乱数 */
+      uint32_to_ipv4_bytes_hton (rand_host_u32, rand_net_u8);
+
+      n = rib_route_lookup (tree, rand_net_u8);
+      sink ^= (uintptr_t)n;
+    }
+
+  t2 = now_seconds ();
+  elapsed = t2 - t1;
+  qps = (elapsed > 0.0) ? (double)trials / elapsed : 0.0;
+
+  printf ("Elapsed time: %.6f sec for %" PRIu64 " lookups\n", elapsed, trials);
+  printf ("Lookup per second: %.6fM lookups/sec\n", qps / 1e6);
+
+  (void)sink; /* 未使用警告抑止 */
+
+  rib_free (tree);
+  return 0;
+}
+
+/* -------------------------------------------
+ * Wrapper functions for test.h
+ * ------------------------------------------- */
+struct rib_tree *
+test_load_routes (const char *routes_filename)
+{
+  return _load_routes (routes_filename);
+}
+
+int
+test_basic (struct rib_tree *t, const char *lookup_addrs_filename)
+{
+  return _run_basic_lookup (t, lookup_addrs_filename);
+}
+
+int
+test_basic_delete (struct rib_tree *t, const char *lookup_addrs_filename,
+                   const char *delete_routes_filename)
+{
+  return _run_delete_test (t, lookup_addrs_filename, delete_routes_filename);
 }
 
 int
 test_performance (struct rib_tree *t)
 {
-  double tv1, tv2;
-  uint64_t res, i;
-  uint32_t rand_addr;
-
-  /* Lookup performance test */
-  tv1 = gettime ();
-
-  unsigned long long N = 0x10000000ULL;
-  res = 0;
-  for ( i = 0; i < N; i++ ) {
-      rand_addr = xor128();
-      res ^= (uint64_t)rib_route_lookup (t, (uint8_t *)&rand_addr);
-  }
-
-  tv2 = gettime ();
-
-  /* Print the results */
-  printf ("Elapsed time: %.6f sec for %llu lookups\n", tv2 - tv1, N);
-  printf ("Lookup per second: %.6fM lookups/sec\n", N / (tv2 - tv1) / 1000000);
-
-  rib_free (t);
-
-  return 0;
-}
-
-int
-test_basic (struct rib_tree *t, const char *filename)
-{
-  int ret;
-  char buf[64], line[4096], addr1[64];
-  struct rib_node *n;
-  uint32_t found_nexthop;
-  struct in_addr addr;
-  FILE *fp;
-
-  fp = fopen (filename, "r");
-  if (fp == NULL)
-      return -1;
-
-  /* Load the lookup addresses */
-  while (fgets(line, sizeof(line), fp) != NULL)
-    {
-      ret = sscanf (line, "%63s", addr1);
-      if (ret < 0)
-        return -1;
-
-      ret = inet_pton (AF_INET, addr1, &addr);
-      if (ret < 0)
-        return -1;
-
-      n = rib_route_lookup (t, (uint8_t *)&addr);
-      if (n)
-        {
-          found_nexthop = htonl((uint32_t)(uintptr_t)n->data);
-          inet_ntop (AF_INET, &found_nexthop, buf, sizeof(buf));
-          printf ("+ Found route for %-16s: %s\n", addr1, buf);
-        }
-      else
-        {
-          printf ("- No route for %s\n", addr1);
-        }
-    }
-
-  fclose (fp);
-  rib_free (t);
-
-  return 0;
+  const uint64_t trials = 0x10000000ULL;
+  return _benchmark_lookup_performance (t, trials);
 }
